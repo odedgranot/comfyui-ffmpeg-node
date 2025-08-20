@@ -1,0 +1,38 @@
+{
+  "last_node_id": 2,
+  "last_link_id": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "FFmpegNode",
+      "pos": [400, 200],
+      "size": {"0": 300, "1": 400},
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": {
+        "input_mp4_1": "/Users/odedgr/Downloads/input1.mp4",
+        "input_mp4_2": "/Users/odedgr/Downloads/input2.mp4",
+        "input_mp4_3": "",
+        "output_path": "/Users/odedgr/Downloads/oded.mp4",
+        "ffmpeg_command": "ffmpeg -i {input1} -filter_complex \"[0:v]trim=start=0.5:end=4.5,setpts=PTS-STARTPTS, scale=1080:1080 [v0]; [1:v]trim=start=0.5:end=4.5,setpts=PTS-STARTPTS, scale=1080:1080 [v1]; [v0] [v1] concat=n=2:v=1:a=0[outv]\" -map \"[outv]\" -an -c:v libx264 -crf 18 -preset veryfast {output}",
+        "execute": true
+      },
+      "title": "FFmpeg Command Runner",
+      "properties": {},
+      "widgets_values": [
+        "/Users/odedgr/Downloads/input1.mp4",
+        "/Users/odedgr/Downloads/input2.mp4",
+        "",
+        "/Users/odedgr/Downloads/oded.mp4",
+        "ffmpeg -i {input1} -filter_complex \"[0:v]trim=start=0.5:end=4.5,setpts=PTS-STARTPTS, scale=1080:1080 [v0]; [1:v]trim=start=0.5:end=4.5,setpts=PTS-STARTPTS, scale=1080:1080 [v1]; [v0] [v1] concat=n=2:v=1:a=0[outv]\" -map \"[outv]\" -an -c:v libx264 -crf 18 -preset veryfast {output}",
+        true
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
