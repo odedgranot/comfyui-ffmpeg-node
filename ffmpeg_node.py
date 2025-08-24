@@ -248,7 +248,7 @@ class FFmpegNode:
             command = command.replace("{inputs}", input_params.strip())
             
             # Replace output placeholder
-            command = command.replace("{output}", f'"{output_path}"')SMART_CONCAT
+            command = command.replace("{output}", f'"{output_path}"')
         
         # If command doesn't contain explicit -i parameters, try to auto-fix
         if command.startswith("ffmpeg ") and " -i " not in command:
