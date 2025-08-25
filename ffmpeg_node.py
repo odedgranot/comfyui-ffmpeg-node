@@ -173,10 +173,19 @@ class FFmpegNode:
         """
         Execute the FFmpeg command with the provided inputs.
         """
+        # Handle None value for execute parameter
+        execute = execute if execute is not None else True
+        
         if not execute:
             return ("FFmpeg execution skipped", "")
         
         # Validate inputs - return error messages instead of raising exceptions
+        # Handle None values safely
+        input_mp4_1 = input_mp4_1 or ""
+        input_mp4_2 = input_mp4_2 or ""
+        output_path = output_path or ""
+        ffmpeg_command = ffmpeg_command or ""
+        
         if not input_mp4_1.strip():
             return ("ERROR: At least one input MP4 URL is required", "")
         
@@ -186,7 +195,11 @@ class FFmpegNode:
         if not ffmpeg_command.strip():
             return ("ERROR: FFmpeg command is required", "")
         
-        # Validate timing parameters
+        # Validate timing parameters - handle None values
+        video_length = video_length if video_length is not None else 4.0
+        trim_start = trim_start if trim_start is not None else 0.5
+        trim_end = trim_end if trim_end is not None else 0.5
+        
         if video_length <= 0:
             return ("ERROR: Video length must be greater than 0", "")
         
