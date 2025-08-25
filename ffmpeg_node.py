@@ -3,6 +3,8 @@ import subprocess
 import re
 import time
 import json
+from datetime import datetime
+from urllib.parse import urlparse
 
 # Try to import ComfyUI modules, but don't fail if they're not available
 try:
@@ -15,16 +17,20 @@ except ImportError:
 
 class FFmpegNode:
     """
-    A ComfyUI node that runs FFmpeg commands with customizable inputs.
+    A ComfyUI node that runs FFmpeg commands with URL inputs.
+    Accepts HTTP/HTTPS URLs to video files and processes them with FFmpeg.
     """
     
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "input_mp4_1": ("STRING", {"default": "", "multiline": False, "placeholder": "Path to first MP4 file"}),
-                "input_mp4_2": ("STRING", {"default": "", "multiline": False, "placeholder": "Path to second MP4 file (optional)"}),
+                "input_mp4_1": ("STRING", {"default": "", "multiline": False, "placeholder": "URL to first MP4 file (e.g., https://example.com/video1.mp4)"}),
+                "input_mp4_2": ("STRING", {"default": "", "multiline": False, "placeholder": "URL to second MP4 file (optional, e.g., https://example.com/video2.mp4)"}),
                 "output_path": ("STRING", {"default": "", "multiline": False, "placeholder": "Complete output file path (e.g., /path/to/output.mp4)"}),
+                "video_length": ("FLOAT", {"default": 4.0, "min": 0.1, "max": 60.0, "step": 0.1, "display": "number"}),
+                "trim_start": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 30.0, "step": 0.1, "display": "number"}),
+                "trim_end": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 30.0, "step": 0.1, "display": "number"}),
                 "ffmpeg_command": ("STRING", {
                     "default": "SMART_CONCAT",
                     "multiline": True,
@@ -59,6 +65,30 @@ class FFmpegNode:
                 return (width, height)
         except Exception as e:
             print(f"[FFmpeg Node] Error getting video dimensions for {video_path}: {str(e)}")
+        return None
+    
+    def is_valid_url(self, url):
+        """
+        Check if the provided string is a valid URL.
+        Returns True for valid HTTP/HTTPS URLs, False otherwise.
+        """
+        try:
+            result = urlparse(url.strip())
+            return all([result.scheme, result.netloc]) and result.scheme in ['http', 'https']
+        except Exception:
+            return False
+    
+    def validate_url_input(self, url, input_name):
+        """
+        Validate a URL input and return error message if invalid.
+        Returns None if valid, error string if invalid.
+        """
+        if not url.strip():
+            return None  # Empty URLs are allowed (optional input)
+        
+        if not self.is_valid_url(url):
+            return f"ERROR: {input_name} must be a valid HTTP/HTTPS URL (e.g., https://example.com/video.mp4)"
+        
         return None
     
     def determine_output_resolution_and_crop(self, input1_path, input2_path, trim1_start=0.5, trim1_end=4.5, trim2_start=0.5, trim2_end=7.5):
@@ -139,7 +169,7 @@ class FFmpegNode:
         
         return command
     
-    def run_ffmpeg(self, input_mp4_1, input_mp4_2, output_path, ffmpeg_command, execute):
+    def run_ffmpeg(self, input_mp4_1, input_mp4_2, output_path, video_length, trim_start, trim_end, ffmpeg_command, execute):
         """
         Execute the FFmpeg command with the provided inputs.
         """
@@ -148,7 +178,7 @@ class FFmpegNode:
         
         # Validate inputs - return error messages instead of raising exceptions
         if not input_mp4_1.strip():
-            return ("ERROR: At least one input MP4 file path is required", "")
+            return ("ERROR: At least one input MP4 URL is required", "")
         
         if not output_path.strip():
             return ("ERROR: Output path is required", "")
@@ -156,68 +186,98 @@ class FFmpegNode:
         if not ffmpeg_command.strip():
             return ("ERROR: FFmpeg command is required", "")
         
+        # Validate timing parameters
+        if video_length <= 0:
+            return ("ERROR: Video length must be greater than 0", "")
+        
+        if trim_start < 0:
+            return ("ERROR: Trim start cannot be negative", "")
+        
+        if trim_end < 0:
+            return ("ERROR: Trim end cannot be negative", "")
+        
+        if trim_start + video_length > 3600:  # 1 hour safety limit
+            return ("ERROR: Trim start + video length cannot exceed 1 hour", "")
+        
         # Ensure output_path has a filename (not just a directory)
         if os.path.isdir(output_path) or output_path.endswith('/') or output_path.endswith('\\'):
             return ("ERROR: Output path must include a filename (e.g., /path/to/output.mp4)", "")
         
-        # Prepare input files list
+        # Validate URL inputs
+        url_error = self.validate_url_input(input_mp4_1, "First input URL")
+        if url_error:
+            return (url_error, "")
+        
+        if input_mp4_2.strip():
+            url_error = self.validate_url_input(input_mp4_2, "Second input URL")
+            if url_error:
+                return (url_error, "")
+        
+        # Prepare input URLs list
         input_files = []
         if input_mp4_1.strip():
             input_files.append(input_mp4_1.strip())
         if input_mp4_2.strip():
             input_files.append(input_mp4_2.strip())
         
-        # Validate input files exist
-        for input_file in input_files:
-            if not os.path.exists(input_file):
-                return (f"ERROR: Input file not found: {input_file}", "")
-        
         # Validate filter_complex usage
         if "[1:v]" in ffmpeg_command and len(input_files) < 2:
-            return (f"ERROR: Command references [1:v] (second input) but only {len(input_files)} input file(s) provided", "")
+            return (f"ERROR: Command references [1:v] (second input) but only {len(input_files)} input URL(s) provided", "")
         if "[1:a]" in ffmpeg_command and len(input_files) < 2:
-            return (f"ERROR: Command references [1:a] (second input audio) but only {len(input_files)} input file(s) provided", "")
+            return (f"ERROR: Command references [1:a] (second input audio) but only {len(input_files)} input URL(s) provided", "")
         
         # Check for unsupported third input references
         if any(ref in ffmpeg_command for ref in ["[2:v]", "[2:a]", "{input3}"]):
             return ("ERROR: This node only supports 2 inputs. Third input references ([2:v], [2:a], {input3}) are not supported", "")
         
+        # Add unique timestamp to output filename
+        output_dir = os.path.dirname(output_path)
+        output_filename = os.path.basename(output_path)
+        
+        # Split filename and extension
+        if '.' in output_filename:
+            name_part, ext_part = os.path.splitext(output_filename)
+        else:
+            name_part = output_filename
+            ext_part = '.mp4'  # Default extension if none provided
+        
+        # Generate timestamp (YYYYMMDD_HHMMSS)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Create new filename with timestamp
+        timestamped_filename = f"{name_part}_{timestamp}{ext_part}"
+        output_path = os.path.join(output_dir, timestamped_filename) if output_dir else timestamped_filename
+        
+        print(f"[FFmpeg Node] Output filename with timestamp: {output_path}")
+        
         # Check for smart concat command
         if "SMART_CONCAT" in ffmpeg_command.upper():
             if len(input_files) != 2:
-                return ("ERROR: SMART_CONCAT requires exactly 2 input files", "")
+                return ("ERROR: SMART_CONCAT requires exactly 2 input URLs", "")
             
-            # Extract parameters from the command or use defaults
-            import re
+            # Calculate trim times based on parameters
+            # Both videos use the same timing parameters
+            trim1_start = trim_start
+            trim1_end = trim_start + video_length
+            trim2_start = trim_start  
+            trim2_end = trim_start + video_length
             
-            # Parse trim parameters if provided
-            trim1_start = 0.5
-            trim1_end = 4.5
-            trim2_start = 0.5
-            trim2_end = 7.5
+            # Default encoding parameters (can still be overridden in command)
             crf = 18
             preset = "veryfast"
             
-            # Look for trim parameters in the command
-            trim_match = re.search(r'trim1=(\d+\.?\d*):(\d+\.?\d*)', ffmpeg_command)
-            if trim_match:
-                trim1_start = float(trim_match.group(1))
-                trim1_end = float(trim_match.group(2))
-            
-            trim_match = re.search(r'trim2=(\d+\.?\d*):(\d+\.?\d*)', ffmpeg_command)
-            if trim_match:
-                trim2_start = float(trim_match.group(1))
-                trim2_end = float(trim_match.group(2))
-            
-            # Look for crf parameter
+            # Look for encoding parameters in the command (optional overrides)
+            import re
             crf_match = re.search(r'crf=(\d+)', ffmpeg_command)
             if crf_match:
                 crf = int(crf_match.group(1))
             
-            # Look for preset parameter
             preset_match = re.search(r'preset=(\w+)', ffmpeg_command)
             if preset_match:
                 preset = preset_match.group(1)
+            
+            print(f"[FFmpeg Node] Using timing - Start: {trim_start}s, Length: {video_length}s, End trim: {trim_end}s")
+            print(f"[FFmpeg Node] Calculated trim times - Video1: {trim1_start}-{trim1_end}s, Video2: {trim2_start}-{trim2_end}s")
             
             # Generate the smart concat command
             smart_command = self.create_smart_concat_command(
